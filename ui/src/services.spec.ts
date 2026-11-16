@@ -10,7 +10,7 @@ const available: ServicesAvailable = {
     { kind: 'mysql', line: '9.7', version: '9.7.4', name: 'MySQL' },
     { kind: 'redis', line: '8', version: '8.10.3', name: 'Redis' },
   ],
-  unavailable: [{ kind: 'typesense', name: 'Typesense', reason: 'Not available on Windows (it needs WSL)' }],
+  unavailable: [{ kind: 'typesense', name: 'Typesense', reason: 'Needs a WSL distro such as Ubuntu (run: wsl --install -d Ubuntu)' }],
 };
 
 function fakeApi(over: Partial<ServicesApi> = {}) {
@@ -99,6 +99,6 @@ describe('services store', () => {
     let copied = '';
     await store.copyEnv('redis', async (text) => void (copied = text));
     expect(copied).toBe('REDIS_HOST=127.0.0.1\nREDIS_PORT=6379');
-    expect(store.unavailable[0].reason).toBe('Not available on Windows (it needs WSL)');
+    expect(store.unavailable[0].reason).toBe('Needs a WSL distro such as Ubuntu (run: wsl --install -d Ubuntu)');
   });
 });

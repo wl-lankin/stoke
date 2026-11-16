@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::kinds::{self, Run};
 use super::store::{self, Instance};
+use super::wsl;
 use crate::StokePaths;
 
 fn home() -> (tempfile::TempDir, StokePaths) {
@@ -113,6 +114,9 @@ fn every_kind_finds_its_program_and_binds_to_loopback() {
         ("silo", "current", &["silo"]),
     ];
     for (i, (kind, line, programs)) in layouts.iter().enumerate() {
+        if wsl::runs_in_wsl(kind) {
+            continue; // Its command goes through wsl.exe: wsl_tests.
+        }
         let inst = store::create(&paths, kind, line, 20000 + i as u16 * 10, None).unwrap();
         let dir = install(&d.path().join(kind), programs);
         let spec = kinds::spec(&paths, &inst, &dir).unwrap_or_else(|e| panic!("{kind}: {e}"));
@@ -124,6 +128,9 @@ fn every_kind_finds_its_program_and_binds_to_loopback() {
 
 #[test]
 fn typesense_uses_its_real_flags_and_keeps_peering_on_loopback() {
+    if wsl::runs_in_wsl("typesense") {
+        return; // The same flags in the WSL start script: wsl_tests.
+    }
     let (d, paths) = home();
     let inst = store::create(&paths, "typesense", "30", 8108, None).unwrap();
     let dir = install(&d.path().join("ts"), &["typesense-server"]);
@@ -148,6 +155,9 @@ fn keys_travel_in_the_environment_not_the_command_line() {
         ("meilisearch", "1", "meilisearch", "MEILI_MASTER_KEY"),
         ("typesense", "30", "typesense-server", "TYPESENSE_API_KEY"),
     ] {
+        if wsl::runs_in_wsl(kind) {
+            continue; // wsl_tests checks it, with WSLENV.
+        }
         let inst = store::create(&paths, kind, line, 7700, None).unwrap();
         let dir = install(&d.path().join(kind), &[program]);
         let spec = kinds::spec(&paths, &inst, &dir).unwrap();

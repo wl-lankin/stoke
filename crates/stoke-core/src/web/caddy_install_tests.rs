@@ -26,6 +26,7 @@ fn a_catalog_without_caddy_is_reported() {
         tools: Default::default(),
         services: vec![],
         node: vec![],
+        wsl: vec![],
     };
     let err = super::caddy_install::pick_caddy(&m).unwrap_err();
     assert_eq!(err.to_string(), "This catalog has no web server for this computer");

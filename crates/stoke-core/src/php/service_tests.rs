@@ -108,6 +108,8 @@ pub(crate) fn fixture_with(damage_php: bool, serve_composer: bool) -> Fixture {
     };
     let meili = b"meilisearch program".to_vec();
     let pg = zip_with(&[("postgresql/bin/postgres", b"pg")]);
+    // Typesense's Linux build, which Windows runs inside WSL: a tar.gz with the program at the top.
+    let typesense_linux = tar_gz_with(&[("typesense-server", b"linux typesense")]);
 
     // Node 22 (LTS "Jod") and 20 ("Iron") laid out like nodejs.org's archives, and a Node 21 whose
     // download does not match its hash.
@@ -142,6 +144,7 @@ pub(crate) fn fixture_with(damage_php: bool, serve_composer: bool) -> Fixture {
         ("/svc/redis".into(), redis_svc.clone()),
         ("/svc/meilisearch".into(), meili.clone()),
         ("/svc/postgresql".into(), b"not the archive".to_vec()),
+        ("/svc/typesense-linux".into(), typesense_linux.clone()),
         ("/node/22".into(), node22.clone()),
         ("/node/20".into(), node20.clone()),
         ("/node/21".into(), b"not the archive".to_vec()),
@@ -238,6 +241,13 @@ pub(crate) fn fixture_with(damage_php: bool, serve_composer: bool) -> Fixture {
             // Typesense exists for macOS only.
             { "kind": "typesense", "line": "30", "version": "30.2", "os": "macos", "arch": "arm64",
               "url": format!("{base}/svc/typesense"), "sha256": hex(b"ts"), "format": "tar.gz", "root": "" },
+        ],
+        // Typesense for WSL: one for this computer, one for another architecture.
+        "wsl": [
+            { "kind": "typesense", "line": "30", "version": "30.2", "os": "linux", "arch": "x64",
+              "url": format!("{base}/svc/typesense-linux"), "sha256": hex(&typesense_linux), "format": "tar.gz", "root": "" },
+            { "kind": "typesense", "line": "29", "version": "29.0", "os": "linux", "arch": "arm64",
+              "url": format!("{base}/svc/typesense-linux-arm"), "sha256": hex(b"arm"), "format": "tar.gz", "root": "" },
         ],
         "node": [
             { "major": 22, "version": "22.21.1", "lts": "Jod", "os": Os::current(), "arch": Arch::current(),

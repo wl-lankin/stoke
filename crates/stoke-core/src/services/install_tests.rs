@@ -37,12 +37,22 @@ async fn a_damaged_download_leaves_nothing_installed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn windows_installs_typesense_from_the_wsl_list() {
+    let f = fixture(false);
+    if Os::current() != Os::Windows {
+        return;
+    }
+    let dir = ensure_installed(&f.core, "typesense", "30").await.unwrap();
+    assert!(dir.ends_with(std::path::Path::new("typesense").join("30.2")), "{}", dir.display());
+    // The Linux program keeps its name: no ".exe".
+    assert_eq!(std::fs::read(dir.join("typesense-server")).unwrap(), b"linux typesense");
+    let err = ensure_installed(&f.core, "typesense", "29").await.unwrap_err().to_string();
+    assert_eq!(err, "The catalog has no Typesense 29 for WSL yet", "another architecture's build is not used");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn kinds_missing_for_this_computer_say_why() {
     let f = fixture(false);
-    let err = ensure_installed(&f.core, "typesense", "30").await.unwrap_err().to_string();
-    if Os::current() == Os::Windows {
-        assert_eq!(err, "Typesense is not available on Windows (it needs WSL)");
-    }
     let err = ensure_installed(&f.core, "mysql", "8.4").await.unwrap_err().to_string();
     assert_eq!(err, "The catalog has no MySQL 8.4 for this computer");
 }
@@ -56,5 +66,8 @@ async fn available_lists_what_this_computer_can_run() {
         available(&manifest).into_iter().map(|b| (b.kind.clone(), b.line.clone())).collect();
     assert!(list.contains(&("redis".into(), "8".into())));
     assert!(list.contains(&("meilisearch".into(), "1".into())));
-    assert_eq!(list.iter().any(|(k, _)| k == "typesense"), Os::current() == Os::Macos && cfg!(target_arch = "aarch64"));
+    // macOS arm64 from `services`, Windows from `wsl`; an Intel Mac has none in the fixture.
+    let typesense = Os::current() == Os::Windows || cfg!(target_arch = "aarch64");
+    assert_eq!(list.iter().any(|(k, _)| k == "typesense"), typesense);
+    assert!(!list.contains(&("typesense".into(), "29".into())), "only this architecture's WSL build");
 }

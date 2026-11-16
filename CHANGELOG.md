@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Typesense runs on Windows: Stoke starts its Linux build inside WSL, in your default distro (Docker Desktop's own `docker-desktop` doesn't count). Without a distro, the Services page says how to get one: `wsl --install -d Ubuntu`. Its data stays inside that distro, and deleting the service removes it there too
+
 ## 2.0.2
 
 - On a Mac, sites no longer stop answering after a while with ports 80 and 443 in use ("caddy did not start in time"): the forwarding now goes to ports of its own (18080 and 18443) instead of Caddy's, so forwarded and direct connections no longer get in each other's way. If you use 80 and 443 already, click "Use 80 and 443" on the Sites page once more

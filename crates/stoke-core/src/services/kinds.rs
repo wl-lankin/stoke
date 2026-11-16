@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::services::install::display_name;
 use crate::services::store::{data_dir, log_file, Instance};
+use crate::services::wsl;
 use crate::supervisor::ProcessSpec;
 use crate::{CoreError, StokePaths};
 
@@ -60,12 +61,18 @@ fn server_candidates(kind: &str) -> &'static [&'static str] {
 }
 
 fn find(install: &Path, candidates: &[&str]) -> Option<PathBuf> {
-    candidates.iter().map(|c| install.join(format!("{c}{}", std::env::consts::EXE_SUFFIX))).find(|p| p.is_file())
+    find_with(install, candidates, std::env::consts::EXE_SUFFIX)
+}
+
+fn find_with(install: &Path, candidates: &[&str], suffix: &str) -> Option<PathBuf> {
+    candidates.iter().map(|c| install.join(format!("{c}{suffix}"))).find(|p| p.is_file())
 }
 
 fn server(inst: &Instance, install: &Path) -> Result<PathBuf, CoreError> {
     let candidates = server_candidates(&inst.kind);
-    find(install, candidates).ok_or_else(|| {
+    // A Linux build run inside WSL has no ".exe".
+    let suffix = if wsl::runs_in_wsl(&inst.kind) { "" } else { std::env::consts::EXE_SUFFIX };
+    find_with(install, candidates, suffix).ok_or_else(|| {
         let name = candidates[0].rsplit('/').next().unwrap_or(candidates[0]);
         CoreError::Php(format!("{} is not installed completely ({name} is missing)", display_name(&inst.kind)))
     })
@@ -123,6 +130,10 @@ pub fn init(inst: &Instance, install: &Path, data: &Path) -> Option<Run> {
 /// How the service runs under the supervisor.
 pub fn spec(paths: &StokePaths, inst: &Instance, install: &Path) -> Result<ProcessSpec, CoreError> {
     let program = server(inst, install)?;
+    if wsl::runs_in_wsl(&inst.kind) {
+        let linux = wsl::linux_path(&inst.distro, &program)?;
+        return Ok(wsl_spec(paths, inst, &linux, std::env::var_os("WSLENV")));
+    }
     let data = data_dir(paths, inst);
     let port = inst.port.to_string();
     let d = data.display().to_string();
@@ -214,8 +225,46 @@ pub fn spec(paths: &StokePaths, inst: &Instance, install: &Path) -> Result<Proce
     })
 }
 
+/// Typesense inside WSL: `wsl.exe` runs it in the foreground, so the supervisor watches it like
+/// any other service. The key reaches Linux through `WSLENV`, not the command line.
+pub(crate) fn wsl_spec(
+    paths: &StokePaths,
+    inst: &Instance,
+    linux_program: &str,
+    wslenv: Option<OsString>,
+) -> ProcessSpec {
+    let args =
+        [inst.id.clone(), linux_program.to_string(), inst.port.to_string(), inst.port.saturating_add(1).to_string()];
+    let run = wsl::run_in(&inst.distro, &wsl::typesense_start_script(), &args.map(OsString::from));
+    ProcessSpec {
+        key: format!("service-{}", inst.id),
+        program: run.program,
+        args: run.args,
+        env: vec![
+            ("TYPESENSE_API_KEY".into(), inst.secret.clone().into()),
+            ("WSLENV".into(), wsl::wslenv_with(wslenv, "TYPESENSE_API_KEY")),
+        ],
+        cwd: Some(data_dir(paths, inst)),
+        log: log_file(paths, inst),
+        ready_port: Some(inst.port),
+        ready_socket: None,
+        guard_port: Some(inst.port),
+        raw_args: false,
+        restart_on_clean_exit: true,
+    }
+}
+
+/// Stops a WSL instance's server (also one left running after Stoke was killed).
+pub fn wsl_stop(inst: &Instance) -> Option<Run> {
+    (wsl::runs_in_wsl(&inst.kind) && !inst.distro.is_empty())
+        .then(|| wsl::run_in(&inst.distro, &wsl::typesense_stop_script(), &[OsString::from(&inst.id)]))
+}
+
 /// A clean shutdown for the databases (the supervisor stops the rest).
 pub fn stop(inst: &Instance, install: &Path, data: &Path) -> Option<Run> {
+    if wsl::runs_in_wsl(&inst.kind) {
+        return wsl_stop(inst);
+    }
     let port = inst.port.to_string();
     match inst.kind.as_str() {
         "mysql" | "mariadb" => {

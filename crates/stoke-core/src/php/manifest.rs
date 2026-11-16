@@ -181,6 +181,41 @@ pub struct Manifest {
     /// Added in M6; older catalogs have none.
     #[serde(default)]
     pub node: Vec<NodeBuild>,
+    /// Linux builds a Windows computer runs inside WSL (Typesense). Kept out of `services`: Stoke
+    /// builds before this list read `os` strictly and would reject a catalog with a Linux row.
+    #[serde(default)]
+    pub wsl: Vec<WslBuild>,
+}
+
+/// A Linux build for WSL; `arch` is the Windows computer's ("x64", "arm64"). Its `os` ("linux")
+/// is not read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WslBuild {
+    pub kind: String,
+    pub line: String,
+    pub version: String,
+    pub arch: Arch,
+    pub url: String,
+    pub sha256: String,
+    pub format: ServiceFormat,
+    pub root: String,
+}
+
+impl WslBuild {
+    /// The build as a service build of this (Windows) computer, for the shared install path.
+    pub fn as_service(&self) -> ServiceBuild {
+        ServiceBuild {
+            kind: self.kind.clone(),
+            line: self.line.clone(),
+            version: self.version.clone(),
+            os: Os::Windows,
+            arch: self.arch,
+            url: self.url.clone(),
+            sha256: self.sha256.clone(),
+            format: self.format,
+            root: self.root.clone(),
+        }
+    }
 }
 
 fn invalid(message: impl std::fmt::Display) -> CoreError {
