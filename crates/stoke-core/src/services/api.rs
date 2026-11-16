@@ -3,9 +3,9 @@
 use serde_json::{json, Value};
 
 use crate::ipc::{CoreState, RpcError, INTERNAL_ERROR, INVALID_PARAMS};
-use crate::php::manifest::{fetch, Os};
+use crate::php::manifest::{fetch, Manifest, Os};
 use crate::services::install::{available, display_name};
-use crate::services::{kinds, ports, run, store};
+use crate::services::{kinds, ports, run, store, wsl};
 use crate::CoreError;
 
 fn invalid(message: impl Into<String>) -> RpcError {
@@ -36,17 +36,37 @@ fn port_of(params: &Value) -> Result<Option<u16>, RpcError> {
 /// plus kinds that cannot run here and why.
 async fn available_list(core: &CoreState) -> Result<Value, RpcError> {
     let manifest = fetch(&core.paths, &core.catalog.url, &core.catalog.public_key).await.map_err(failed)?;
-    let rows: Vec<Value> = available(&manifest)
-        .into_iter()
+    let has_distro = if cfg!(windows) {
+        tokio::task::spawn_blocking(|| wsl::pick_distro(&wsl::distros()).is_some()).await.unwrap_or(false)
+    } else {
+        false
+    };
+    Ok(listing(&manifest, has_distro))
+}
+
+/// The builds and the kinds that cannot run, given whether a WSL distro is there to run the
+/// Linux-only kinds on Windows.
+pub(crate) fn listing(manifest: &Manifest, has_distro: bool) -> Value {
+    let builds = available(manifest);
+    let rows: Vec<Value> = builds
+        .iter()
+        .filter(|b| has_distro || !wsl::runs_in_wsl(&b.kind))
         .map(|b| json!({ "kind": b.kind, "line": b.line, "version": b.version, "name": display_name(&b.kind) }))
         .collect();
     let mut missing = vec![];
     if Os::current() == Os::Windows {
-        missing.push(
-            json!({ "kind": "typesense", "name": "Typesense", "reason": "Not available on Windows (it needs WSL)" }),
-        );
+        let reason = if !has_distro {
+            wsl::NO_DISTRO
+        } else if !builds.iter().any(|b| b.kind == "typesense") {
+            "Not in the catalog for WSL yet"
+        } else {
+            ""
+        };
+        if !reason.is_empty() {
+            missing.push(json!({ "kind": "typesense", "name": "Typesense", "reason": reason }));
+        }
     }
-    Ok(json!({ "builds": rows, "unavailable": missing }))
+    json!({ "builds": rows, "unavailable": missing })
 }
 
 async fn create(core: &CoreState, params: &Value) -> Result<Value, RpcError> {
@@ -65,6 +85,7 @@ async fn create(core: &CoreState, params: &Value) -> Result<Value, RpcError> {
         autostart: false,
         name: String::new(),
         secret: String::new(),
+        distro: String::new(),
     };
     ports::check(&core.paths, &kinds::ports(&probe), None).map_err(failed)?;
     let instance = store::create(&core.paths, kind, line, port, name).map_err(failed)?;

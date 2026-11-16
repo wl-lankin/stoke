@@ -8,6 +8,7 @@ use crate::ipc::CoreState;
 use crate::php::download::download;
 use crate::php::manifest::{compare_versions, fetch, Arch, Format, Manifest, Os, ServiceBuild, ServiceFormat};
 use crate::php::unpack::unpack;
+use crate::services::wsl::runs_in_wsl;
 use crate::CoreError;
 
 /// How a kind is called in messages.
@@ -24,9 +25,11 @@ pub fn display_name(kind: &str) -> &str {
     }
 }
 
-/// The builds this computer can run.
-pub fn available(manifest: &Manifest) -> Vec<&ServiceBuild> {
-    manifest.services.iter().filter(|b| b.os == Os::current() && b.arch == Arch::current()).collect()
+/// The builds this computer can run; on Windows also the Linux builds it runs inside WSL.
+pub fn available(manifest: &Manifest) -> Vec<ServiceBuild> {
+    let native = manifest.services.iter().filter(|b| b.os == Os::current() && b.arch == Arch::current()).cloned();
+    let wsl = manifest.wsl.iter().filter(|b| runs_in_wsl(&b.kind) && b.arch == Arch::current()).map(|b| b.as_service());
+    native.chain(wsl).collect()
 }
 
 fn kind_dir(core: &CoreState, kind: &str) -> PathBuf {
@@ -53,12 +56,12 @@ pub fn installed(core: &CoreState, kind: &str, line: &str) -> Option<PathBuf> {
 }
 
 /// The catalog's build of `kind` at `line` for this computer, or why there is none.
-pub fn pick<'m>(manifest: &'m Manifest, kind: &str, line: &str) -> Result<&'m ServiceBuild, CoreError> {
+pub fn pick(manifest: &Manifest, kind: &str, line: &str) -> Result<ServiceBuild, CoreError> {
     if let Some(build) = available(manifest).into_iter().find(|b| b.kind == kind && b.line == line) {
         return Ok(build);
     }
-    if kind == "typesense" && Os::current() == Os::Windows {
-        return Err(CoreError::Php("Typesense is not available on Windows (it needs WSL)".into()));
+    if runs_in_wsl(kind) {
+        return Err(CoreError::Php(format!("The catalog has no {} {line} for WSL yet", display_name(kind))));
     }
     Err(CoreError::Php(format!("The catalog has no {} {line} for this computer", display_name(kind))))
 }
@@ -69,7 +72,7 @@ pub async fn ensure_installed(core: &CoreState, kind: &str, line: &str) -> Resul
         return Ok(dir);
     }
     let manifest = fetch(&core.paths, &core.catalog.url, &core.catalog.public_key).await?;
-    let build = pick(&manifest, kind, line)?.clone();
+    let build = pick(&manifest, kind, line)?;
     let _tools = core.tools_lock.lock().await;
     let dir = kind_dir(core, kind).join(&build.version);
     if dir.is_dir() {

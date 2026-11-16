@@ -14,6 +14,7 @@ use crate::services::install::{ensure_installed, installed};
 use crate::services::kinds::{self, Run};
 use crate::services::ports;
 use crate::services::store::{self, data_dir, log_file, Instance};
+use crate::services::wsl;
 use crate::supervisor::{log_tail, terminate};
 use crate::CoreError;
 
@@ -74,9 +75,12 @@ pub(crate) async fn start_locked(core: &CoreState, id: &str) -> Result<(), CoreE
 }
 
 async fn start_inner(core: &CoreState, id: &str) -> Result<(), CoreError> {
-    let inst = store::get(&core.paths, id)?;
+    let mut inst = store::get(&core.paths, id)?;
     if running(core, id) {
         return Ok(());
+    }
+    if wsl::runs_in_wsl(&inst.kind) {
+        inst = prepare_wsl(core, inst).await?;
     }
     ports::check(&core.paths, &kinds::ports(&inst), Some(id))?;
     let install = ensure_installed(core, &inst.kind, &inst.line).await?;
@@ -84,6 +88,28 @@ async fn start_inner(core: &CoreState, id: &str) -> Result<(), CoreError> {
     tokio::task::spawn_blocking(move || launch(&core, &inst, &install))
         .await
         .map_err(|e| CoreError::Php(e.to_string()))?
+}
+
+/// Fixes the distro of a WSL instance at its first start and stops a server of it that outlived
+/// Stoke (killing `wsl.exe` does not always end the Linux process), which would hold its port.
+async fn prepare_wsl(core: &CoreState, mut inst: Instance) -> Result<Instance, CoreError> {
+    let installed = tokio::task::spawn_blocking(wsl::distros).await.map_err(|e| CoreError::Php(e.to_string()))?;
+    let distro = wsl::distro_for(&inst, &installed)?;
+    if inst.distro != distro {
+        store::set_distro(&core.paths, &inst.id, &distro)?;
+        inst.distro = distro;
+    }
+    if let Some(stale) = kinds::wsl_stop(&inst) {
+        let log = log_file(&core.paths, &inst);
+        if let Some(dir) = log.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| CoreError::io(dir, e))?;
+        }
+        tokio::task::spawn_blocking(move || run_to_end(&stale, &log, SHUTDOWN_TIMEOUT))
+            .await
+            .map_err(|e| CoreError::Php(e.to_string()))?
+            .map_err(|e| CoreError::Php(format!("WSL ({}) did not answer: {e}", inst.distro)))?;
+    }
+    Ok(inst)
 }
 
 /// Setup (once) and start, then wait for the port. Blocking.
@@ -302,6 +328,13 @@ pub async fn delete(core: &CoreState, id: &str) -> Result<(), CoreError> {
     let lock = lock_for(core, id);
     let _one = lock.lock().await;
     stop_locked(core, id).await?;
+    let inst = store::get(&core.paths, id)?;
+    if wsl::runs_in_wsl(&inst.kind) && !inst.distro.is_empty() {
+        // Best effort: a distro that is gone took the data with it.
+        let run = wsl::run_in(&inst.distro, &wsl::delete_script(), &[inst.id.clone().into()]);
+        let log = log_file(&core.paths, &inst);
+        let _ = tokio::task::spawn_blocking(move || run_to_end(&run, &log, SHUTDOWN_TIMEOUT)).await;
+    }
     store::delete(&core.paths, id)
 }
 

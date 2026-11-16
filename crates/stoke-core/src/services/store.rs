@@ -24,6 +24,10 @@ pub struct Instance {
     /// The generated key or password of kinds that need one (Meilisearch, Typesense, Silo).
     #[serde(default)]
     pub secret: String,
+    /// The WSL distro a Windows instance of a Linux-only kind (Typesense) runs in, fixed at its
+    /// first start so its data stays found when the default distro changes. Empty otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub distro: String,
 }
 
 /// One load-change-save of services.json at a time (the app and a CLI call may create at once).
@@ -84,7 +88,16 @@ pub fn create(
     };
     let secret = if kinds::needs_secret(kind) { secret() } else { String::new() };
     // A new service starts with Stoke: a database that is gone after a restart looks like lost data.
-    let instance = Instance { id, kind: kind.into(), line: line.into(), port, autostart: true, name, secret };
+    let instance = Instance {
+        id,
+        kind: kind.into(),
+        line: line.into(),
+        port,
+        autostart: true,
+        name,
+        secret,
+        distro: String::new(),
+    };
     instances.push(instance.clone());
     save(paths, &instances)?;
     Ok(instance)
@@ -113,6 +126,10 @@ fn change(paths: &StokePaths, id: &str, f: impl FnOnce(&mut Instance)) -> Result
 
 pub fn set_port(paths: &StokePaths, id: &str, port: u16) -> Result<(), CoreError> {
     change(paths, id, |i| i.port = port)
+}
+
+pub fn set_distro(paths: &StokePaths, id: &str, distro: &str) -> Result<(), CoreError> {
+    change(paths, id, |i| i.distro = distro.to_string())
 }
 
 pub fn set_autostart(paths: &StokePaths, id: &str, on: bool) -> Result<(), CoreError> {

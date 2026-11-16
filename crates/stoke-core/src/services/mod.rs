@@ -16,6 +16,9 @@ mod run_tests;
 pub mod store;
 #[cfg(test)]
 mod tests;
+pub mod wsl;
+#[cfg(test)]
+mod wsl_tests;
 
 /// Tests that start service processes on real ports run one at a time, across modules.
 #[cfg(test)]

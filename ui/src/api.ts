@@ -335,7 +335,7 @@ const demoServicesAvailable: ServicesAvailable = {
     ['postgresql', '18', '18.6.1', 'PostgreSQL'], ['postgresql', '17', '17.11.1', 'PostgreSQL'],
     ['redis', '8', '8.10.3', 'Redis'], ['meilisearch', '1', '1.56.0', 'Meilisearch'], ['silo', 'current', '20261026000000.0.0', 'Silo (S3)'],
   ].map(([kind, line, version, name]) => ({ kind, line, version, name })),
-  unavailable: [{ kind: 'typesense', name: 'Typesense', reason: 'Not available on Windows (it needs WSL)' }],
+  unavailable: [{ kind: 'typesense', name: 'Typesense', reason: 'Needs a WSL distro such as Ubuntu (run: wsl --install -d Ubuntu)' }],
 };
 
 export const servicesList = (): Promise<ServiceRow[]> => (demo ? Promise.resolve(structuredClone(demoServices)) : core('services.list'));
